@@ -4,9 +4,30 @@ import os
 import random
 import re
 import string
+import threading
+from socketserver import StreamRequestHandler, TCPServer
 
 from Chainmail import Wrapper
 from Chainmail.Plugin import ChainmailPlugin
+
+
+class RCONClientHandler(StreamRequestHandler):
+
+    def __init__(self, request, client_address, server):
+        super().__init__(request, client_address, server)
+        self.authed = False
+
+    def handle(self):
+        rcon = getattr(builtins, "RCON")  # type: ChainmailRCON
+        if rcon.config["use_whitelist"] and self.client_address[0] not in rcon.config["whitelisted_ips"]:
+            self.writeline("ERROR: Not on whitelist")
+            return
+        while rcon.enabled and rcon.wrapper.wrapper_running:
+            line = self.rfile.readline().decode("utf-8").strip()
+            rcon.process_command(line, self)
+
+    def writeline(self, line: str):
+        self.wfile.write(f"{line}\n".encode("utf-8"))
 
 
 class ChainmailRCON(ChainmailPlugin):
@@ -30,6 +51,8 @@ class ChainmailRCON(ChainmailPlugin):
             with open(os.path.join(manifest["path"], "config.json")) as f:
                 self.config = json.load(f)
 
+        self.server = TCPServer(("", self.config["port"]), RCONClientHandler)
+
         builtins.RCON = self
 
     def register_command(self, name: str, regex: str, description: str, handler: classmethod, requires_auth: bool = False) -> None:
@@ -48,3 +71,22 @@ class ChainmailRCON(ChainmailPlugin):
             "handler": handler,
             "requires_auth": requires_auth
         })
+
+    def process_command(self, data: str, handler: RCONClientHandler):
+        for command in self.commands:
+            if command["regex"].match(data):
+                if not command["requires_auth"] or handler.authed:
+                    command["handler"](command["regex"].findall(data), handler)
+
+    def run_server(self):
+        self.server.serve_forever()
+        self.server.server_close()
+
+    def enable(self) -> None:
+        super().enable()
+        threading.Thread(target=self.run_server).start()
+
+    def disable(self) -> None:
+        super().disable()
+        self.server.shutdown()
+
