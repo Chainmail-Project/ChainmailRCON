@@ -6,28 +6,49 @@ import re
 import string
 import threading
 from socketserver import StreamRequestHandler, TCPServer
+from typing import List
+from typing import Match
 
 from Chainmail import Wrapper
 from Chainmail.Plugin import ChainmailPlugin
+from Chainmail.Events import ConsoleOutputEvent, Events
 
 
 class RCONClientHandler(StreamRequestHandler):
 
-    def __init__(self, request, client_address, server):
-        super().__init__(request, client_address, server)
+    # noinspection PyAttributeOutsideInit
+    def setup(self):
+        super().setup()
         self.authed = False
+        self.rcon = getattr(builtins, "RCON")  # type: ChainmailRCON
+        self.rcon.logger.info(f"New client connected from {self.client_address[0]}")
+        self.rcon.clients.append(self)
 
     def handle(self):
-        rcon = getattr(builtins, "RCON")  # type: ChainmailRCON
-        if rcon.config["use_whitelist"] and self.client_address[0] not in rcon.config["whitelisted_ips"]:
-            self.writeline("ERROR: Not on whitelist")
-            return
-        while rcon.enabled and rcon.wrapper.wrapper_running:
-            line = self.rfile.readline().decode("utf-8").strip()
-            rcon.process_command(line, self)
+        try:
+            if self.rcon.config["use_whitelist"] and self.client_address[0] not in self.rcon.config["whitelisted_ips"]:
+                self.writeline("ERROR: Not on whitelist")
+                return
+            while self.rcon.enabled and self.rcon.wrapper.wrapper_running:
+                line = self.rfile.readline().decode("utf-8").strip()
+                self.rcon.process_command(line, self)
+        except (BrokenPipeError, OSError, ConnectionResetError):
+            self.finish()
+
+
+    def finish(self):
+        super().finish()
+        try:
+            self.rcon.clients.remove(self)
+        except ValueError:
+            pass
+        self.rcon.logger.info(f"Client {self.client_address[0]} disconnected")
 
     def writeline(self, line: str):
-        self.wfile.write(f"{line}\n".encode("utf-8"))
+        try:
+            self.wfile.write(f"{line}\n".encode("utf-8"))
+        except (BrokenPipeError, OSError, ConnectionResetError):
+            self.finish()
 
 
 class ChainmailRCON(ChainmailPlugin):
@@ -35,7 +56,10 @@ class ChainmailRCON(ChainmailPlugin):
     def __init__(self, manifest: dict, wrapper: "Wrapper.Wrapper") -> None:
         super().__init__(manifest, wrapper)
 
+        builtins.RCON = self
+
         self.commands = []
+        self.clients = []  # type: List[RCONClientHandler]
 
         if not os.path.isfile(os.path.join(manifest["path"], "config.json")):
             with open(os.path.join(manifest["path"], "config.json"), "w") as f:
@@ -51,9 +75,9 @@ class ChainmailRCON(ChainmailPlugin):
             with open(os.path.join(manifest["path"], "config.json")) as f:
                 self.config = json.load(f)
 
-        self.server = TCPServer(("", self.config["port"]), RCONClientHandler)
+        self.wrapper.EventManager.register_handler(Events.CONSOLE_OUTPUT, self.handle_console_output)
 
-        builtins.RCON = self
+        self.server = TCPServer(("", self.config["port"]), RCONClientHandler)
 
     def register_command(self, name: str, regex: str, description: str, handler: classmethod, requires_auth: bool = False) -> None:
         """
@@ -90,3 +114,14 @@ class ChainmailRCON(ChainmailPlugin):
         super().disable()
         self.server.shutdown()
 
+    def command_auth(self, matches: Match[str], handler: RCONClientHandler):
+        if matches[0] == self.config["password"]:
+            handler.authed = True
+            handler.writeline("RCON-AUTH: Client authenticated successfully")
+        else:
+            handler.authed = False
+            handler.writeline("RCON-AUTH: Invalid RCON password")
+
+    def handle_console_output(self, event: ConsoleOutputEvent):
+        for client in self.clients:
+            client.writeline(event.output)
