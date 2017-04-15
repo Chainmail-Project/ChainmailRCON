@@ -21,7 +21,8 @@ class ChainmailRCON(ChainmailPlugin):
                 self.config = {
                     "password": "".join(random.choice(string.ascii_letters + string.digits) for i in range(16)),
                     "use_whitelist": False,
-                    "whitelisted_ips": []
+                    "whitelisted_ips": [],
+                    "port": 25566
                 }
                 json.dump(self.config, f, sort_keys=True, indent=4)
                 self.logger.info(f"Generated new config. Use the password {self.config['password']} to authenticate.")
