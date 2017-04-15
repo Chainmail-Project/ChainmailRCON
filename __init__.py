@@ -24,6 +24,7 @@ class RCONClientHandler(StreamRequestHandler):
         self.rcon.logger.info(f"New client connected from {self.client_address[0]}")
         self.rcon.clients.append(self)
 
+
     def handle(self):
         try:
             if self.rcon.config["use_whitelist"] and self.client_address[0] not in self.rcon.config["whitelisted_ips"]:
@@ -77,6 +78,8 @@ class ChainmailRCON(ChainmailPlugin):
 
         self.wrapper.EventManager.register_handler(Events.CONSOLE_OUTPUT, self.handle_console_output)
 
+        self.register_command("/auth", "\\/auth ([\\w]+)", "Authenticates using a password to gain access to higher privilege commands.", self.command_auth)
+
         self.server = TCPServer(("", self.config["port"]), RCONClientHandler)
 
     def register_command(self, name: str, regex: str, description: str, handler: classmethod, requires_auth: bool = False) -> None:
@@ -117,10 +120,10 @@ class ChainmailRCON(ChainmailPlugin):
     def command_auth(self, matches: Match[str], handler: RCONClientHandler):
         if matches[0] == self.config["password"]:
             handler.authed = True
-            handler.writeline("RCON-AUTH: Client authenticated successfully")
+            handler.writeline("AUTH: Client authenticated successfully")
         else:
             handler.authed = False
-            handler.writeline("RCON-AUTH: Invalid RCON password")
+            handler.writeline("AUTH: Invalid RCON password")
 
     def handle_console_output(self, event: ConsoleOutputEvent):
         for client in self.clients:
