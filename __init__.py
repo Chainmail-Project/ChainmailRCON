@@ -105,6 +105,9 @@ class ChainmailRCON(ChainmailPlugin):
             if command["regex"].match(data):
                 if not command["requires_auth"] or handler.authed:
                     threading.Thread(target=command["handler"], args=(command["regex"].findall(data), handler)).start()
+                    return
+        if handler.authed:
+            self.wrapper.write_line(data)
 
     def run_server(self):
         self.server.serve_forever()
