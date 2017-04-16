@@ -7,7 +7,7 @@ import string
 import threading
 from socketserver import StreamRequestHandler, ThreadingTCPServer
 from typing import List, Match
-from socket import SOL_SOCKET, SO_REUSEADDR
+from socket import SOL_SOCKET, SO_REUSEADDR, SHUT_RDWR
 
 from Chainmail import Wrapper
 from Chainmail.Plugin import ChainmailPlugin
@@ -32,7 +32,8 @@ class RCONClientHandler(StreamRequestHandler):
                 return
             while self.rcon.enabled and self.rcon.wrapper.wrapper_running:
                 line = self.rfile.readline().decode("utf-8").strip()
-                self.rcon.process_command(line, self)
+                if line != "":
+                    self.rcon.process_command(line, self)
         except (BrokenPipeError, OSError, ConnectionResetError):
             self.finish()
 
@@ -120,6 +121,8 @@ class ChainmailRCON(ChainmailPlugin):
     def disable(self) -> None:
         super().disable()
         self.server.shutdown()
+        for client in self.clients[:]:
+            client.connection.shutdown(SHUT_RDWR)
 
     def command_auth(self, matches: Match[str], handler: RCONClientHandler):
         if matches[0] == self.config["password"]:
