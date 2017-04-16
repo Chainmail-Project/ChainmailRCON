@@ -5,9 +5,9 @@ import random
 import re
 import string
 import threading
-from socketserver import StreamRequestHandler, TCPServer
-from typing import List
-from typing import Match
+from socketserver import StreamRequestHandler, ThreadingTCPServer
+from typing import List, Match
+from socket import SOL_SOCKET, SO_REUSEADDR
 
 from Chainmail import Wrapper
 from Chainmail.Plugin import ChainmailPlugin
@@ -80,7 +80,8 @@ class ChainmailRCON(ChainmailPlugin):
 
         self.register_command("/auth", "\\/auth ([\\w]+)", "Authenticates using a password to gain access to higher privilege commands.", self.command_auth)
 
-        self.server = TCPServer(("", self.config["port"]), RCONClientHandler)
+        self.server = ThreadingTCPServer(("", self.config["port"]), RCONClientHandler)
+        self.server.socket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
     def register_command(self, name: str, regex: str, description: str, handler: classmethod, requires_auth: bool = False) -> None:
         """
@@ -103,7 +104,7 @@ class ChainmailRCON(ChainmailPlugin):
         for command in self.commands:
             if command["regex"].match(data):
                 if not command["requires_auth"] or handler.authed:
-                    command["handler"](command["regex"].findall(data), handler)
+                    threading.Thread(target=command["handler"], args=(command["regex"].findall(data), handler)).start()
 
     def run_server(self):
         self.server.serve_forever()
