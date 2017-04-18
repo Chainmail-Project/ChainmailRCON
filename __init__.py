@@ -24,7 +24,6 @@ class RCONClientHandler(StreamRequestHandler):
         self.rcon.logger.info(f"New client connected from {self.client_address[0]}")
         self.rcon.clients.append(self)
 
-
     def handle(self):
         try:
             if self.rcon.config["use_whitelist"] and self.client_address[0] not in self.rcon.config["whitelisted_ips"]:
@@ -36,7 +35,6 @@ class RCONClientHandler(StreamRequestHandler):
                     self.rcon.process_command(line, self)
         except (BrokenPipeError, OSError, ConnectionResetError):
             self.finish()
-
 
     def finish(self):
         super().finish()
